@@ -11,26 +11,28 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { board_id, value } = req.body; // Payload z mikrokontrolera
+    const { board_id, value } = req.body; // Payload from NodeMCU
 
     if (!board_id || value === undefined) {
       return res.status(400).json({ error: 'Brak wymaganych danych: board_id lub value' });
     }
 
-    // Krok A: Pobierz lub utwórz doniczkę
+    // Step A: Get pot or create new
     let { data: pot, error: potError } = await supabase
       .from('pots')
       .select('id')
       .eq('board_id', board_id)
-      .single();
+      .maybeSingle();
 
-    if (potError || !pot) {
+    if (potError) throw potError;
+
+    if (!pot) {
       const { data: newPot, error: createError } = await supabase
         .from('pots')
-        .insert([{ 
-          board_id: board_id, 
-          name: `Nowa doniczka ${board_id}`, 
-          interval_minutes: 60 
+        .insert([{
+          board_id: board_id,
+          name: `Nowa doniczka ${board_id}`,
+          interval_minutes: 60
         }])
         .select('id')
         .single();
@@ -39,20 +41,21 @@ export default async function handler(req, res) {
       pot = newPot;
     }
 
-    // Krok B: Zapisz pomiar
+    // Step B: Save the pot measurement
     const { error: insertError } = await supabase
       .from('pot_measurements')
       .insert([{ pot_id: pot.id, sensor_value: value }]);
 
     if (insertError) throw insertError;
 
-    // Krok C: Aktualizacja ostatniego sygnału
+    // Step C: Update last signal time
+    // TODO: it can be moved to a SQL trigger
     await supabase
       .from('pots')
       .update({ last_signal_time: new Date().toISOString() })
       .eq('id', pot.id);
 
-    return res.status(200).json({ success: true, message: 'Pomiar zapisany' });
+    return res.status(200).json({ success: true, message: 'Measurement saved' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
