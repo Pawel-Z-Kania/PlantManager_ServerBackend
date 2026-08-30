@@ -53,13 +53,6 @@ export default async function handler(req, res) {
 
     if (insertError) throw insertError;
 
-    // Step C: Update last signal time
-    // TODO: it can be moved to a SQL trigger
-    await supabase
-      .from('pots')
-      .update({ last_signal_time: new Date().toISOString() })
-      .eq('id', pot.id);
-
     return res.status(200).json({ success: true, message: 'Measurement saved' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
