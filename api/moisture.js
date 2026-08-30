@@ -10,6 +10,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
+  const apiKey = req.headers['x-api-key'];
+  if (process.env.API_SECRET_KEY && apiKey !== process.env.API_SECRET_KEY) {
+    return res.status(401).json({ error: 'No authentication' });
+  }
+
   try {
     const { board_id, value } = req.body; // Payload from NodeMCU
 
