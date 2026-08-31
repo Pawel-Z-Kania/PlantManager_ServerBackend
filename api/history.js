@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { board_id } = req.query;
+  const { board_id, from, to, bucket_minutes } = req.query;
 
   if (!board_id) {
     return res.status(400).json({ error: 'Required parameter board_id not provided' });
@@ -24,22 +24,46 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (potError) throw potError;
-    if (!pot) return res.status(404).json({
-      error: "Nie znaleziono doniczki"
-    })
+    if (!pot) return res.status(404).json({ error: 'Nie znaleziono doniczki' });
 
-    const { data: history, error: historyError } = await supabase
+    const bucketMin = parseInt(bucket_minutes) || 0;
+    // Higher cap for bucketed queries — raw rows are aggregated before response
+    const safetyCap = bucketMin > 0 ? 50000 : 2000;
+
+    let query = supabase
       .from('pot_measurements')
       .select('sensor_value, measured_at')
       .eq('pot_id', pot.id)
-      .order('measured_at', { ascending: false })
-      .limit(50);
+      .order('measured_at', { ascending: true })
+      .limit(safetyCap);
 
+    if (from) query = query.gte('measured_at', from);
+    if (to)   query = query.lte('measured_at', to);
+
+    const { data: history, error: historyError } = await query;
     if (historyError) throw historyError;
 
-    return res.status(200).json({ data: history })
-  }
-  catch (err) {
+    if (bucketMin > 0 && history.length > 0) {
+      const bucketMs = bucketMin * 60 * 1000;
+      const buckets = {};
+      for (const row of history) {
+        const ts  = new Date(row.measured_at).getTime();
+        const key = Math.floor(ts / bucketMs) * bucketMs;
+        if (!buckets[key]) buckets[key] = { sum: 0, count: 0 };
+        buckets[key].sum   += row.sensor_value;
+        buckets[key].count += 1;
+      }
+      const aggregated = Object.entries(buckets)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([ts, { sum, count }]) => ({
+          sensor_value: Math.round(sum / count),
+          measured_at:  new Date(Number(ts)).toISOString(),
+        }));
+      return res.status(200).json({ data: aggregated });
+    }
+
+    return res.status(200).json({ data: history });
+  } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 }
