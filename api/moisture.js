@@ -16,11 +16,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { board_id, value } = req.body; // Payload from NodeMCU
+    const { board_id, value, battery_mv } = req.body; // Payload from NodeMCU
 
     if (!board_id || value === undefined) {
       return res.status(400).json({ error: 'Brak wymaganych danych: board_id lub value' });
     }
+
+    // 65535 - treat as no reading
+    const batteryMv = (battery_mv === undefined || battery_mv === 65535) ? null : battery_mv;
 
     // Step A: Get pot or create new
     let { data: pot, error: potError } = await supabase
@@ -49,9 +52,19 @@ export default async function handler(req, res) {
     // Step B: Save the pot measurement
     const { error: insertError } = await supabase
       .from('pot_measurements')
-      .insert([{ pot_id: pot.id, sensor_value: value }]);
+      .insert([{ pot_id: pot.id, sensor_value: value, battery_mv: batteryMv }]);
 
     if (insertError) throw insertError;
+
+    // Step C: Update latest known battery level 
+    if (batteryMv !== null) {
+      const { error: updateError } = await supabase
+        .from('pots')
+        .update({ battery_mv: batteryMv })
+        .eq('id', pot.id);
+
+      if (updateError) throw updateError;
+    }
 
     return res.status(200).json({ success: true, message: 'Measurement saved' });
   } catch (err) {

@@ -5,6 +5,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const LOW_BATTERY_THRESHOLD_MV = 2700;
+
 export default async function handler(req, res) {
   // Opcjonalne zabezpieczenie: Vercel Cron przesyła specjalny nagłówek Authorization
   // Możesz go zweryfikować, jeśli ustawisz CRON_SECRET w zmiennych środowiskowych Vercela
@@ -21,13 +23,27 @@ export default async function handler(req, res) {
     // Zapytanie do bazy o doniczki wraz z parametrami interwału
     const { data: pots, error } = await supabase
       .from('pots')
-      .select('id, name, last_signal_time, interval_minutes');
+      .select('id, name, last_signal_time, interval_minutes, battery_mv');
 
     if (error) throw error;
 
     const alerts = [];
 
     pots.forEach((pot) => {
+      if (pot.battery_mv !== null && pot.battery_mv !== undefined && pot.battery_mv < LOW_BATTERY_THRESHOLD_MV) {
+        console.warn(
+          `[!! ALARM !!] Doniczka "${pot.name}" ma niski poziom baterii: ${pot.battery_mv}mV (limit: ${LOW_BATTERY_THRESHOLD_MV}mV)!`
+        );
+
+        alerts.push({
+          type: 'low_battery',
+          pot_id: pot.id,
+          name: pot.name,
+          battery_mv: pot.battery_mv,
+          threshold_mv: LOW_BATTERY_THRESHOLD_MV,
+        });
+      }
+
       if (!pot.last_signal_time) return; // Pomijamy doniczki bez żadnego sygnału
 
       const lastTime = new Date(pot.last_signal_time);
@@ -44,6 +60,7 @@ export default async function handler(req, res) {
         // [TUTAJ PÓŹNIEJ WPADNIEMY Z FIREBASE / PUSH NOTIFICATIONS / EMAIL]
         
         alerts.push({
+          type: 'overdue',
           pot_id: pot.id,
           name: pot.name,
           overdue_minutes: overDueMin,
