@@ -1,9 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// GET/PUT /api/config — Odczyt i edycja globalnych progów systemowych (bateria, limit czasu
+// bez połączenia) w tabeli system_config; te wartości napędzają logikę alertów w pots.js
+// i watchdog.js. Brak jeszcze ekranu ustawień w aplikacji — dziś wywoływane ręcznie/administracyjnie.
+import { supabase } from './_lib/supabaseClient.js';
+import { getSystemConfig } from './_lib/systemConfig.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -21,22 +20,7 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const { data, error } = await supabase
-        .from('system_config')
-        .select('*')
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
-
-      const config = {
-        battery_critical_mv: 2700,
-        battery_warning_mv: 2800,
-        connection_timeout_hours: 2,
-        ...data,
-      };
-
-      return res.status(200).json(config);
+        .froconfig = await getSystemConfig();      return res.status(200).json(config);
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {

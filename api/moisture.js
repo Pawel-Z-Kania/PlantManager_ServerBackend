@@ -1,9 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// POST /api/moisture — Punkt przyjmowania odczytów z urządzenia (NodeMCU/ESP): zapisuje pomiar
+// wilgotności i opcjonalnie poziom baterii, tworząc doniczkę przy jej pierwszym sygnale.
+import { supabase } from './_lib/supabaseClient.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

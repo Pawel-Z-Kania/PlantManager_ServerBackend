@@ -1,11 +1,10 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-const LOW_BATTERY_THRESHOLD_MV = 2700;
+// GET /api/watchdog — Vercel Cron (patrz vercel.json, raz dziennie). Sprawdza doniczki pod kątem
+// niskiego poziomu baterii (te same progi/logika co pots.js, przez computeAlerts) oraz opóźnień
+// w raportowaniu względem oczekiwanego interwału danej doniczki (interval_minutes) — osobny,
+// wcześniejszy sygnał ostrzegawczy pomyślany pod przyszłe powiadomienia push/e-mail.
+import { supabase } from './_lib/supabaseClient.js';
+import { getSystemConfig } from './_lib/systemConfig.js';
+import { computeAlerts } from './_lib/alerts.js';
 
 export default async function handler(req, res) {
   // Opcjonalne zabezpieczenie: Vercel Cron przesyła specjalny nagłówek Authorization
@@ -20,6 +19,9 @@ export default async function handler(req, res) {
   console.log('[WATCHDOG] Sprawdzanie opóźnień czujników...');
 
   try {
+    // Pobierz dynamiczne progi z system_config
+    const config = await getSystemConfig();
+
     // Zapytanie do bazy o doniczki wraz z parametrami interwału
     const { data: pots, error } = await supabase
       .from('pots')
@@ -27,27 +29,32 @@ export default async function handler(req, res) {
 
     if (error) throw error;
 
+    const now = new Date();
     const alerts = [];
 
     pots.forEach((pot) => {
-      if (pot.battery_mv !== null && pot.battery_mv !== undefined && pot.battery_mv < LOW_BATTERY_THRESHOLD_MV) {
+      // Bateria: te same progi/logika co pots.js, zmapowane na format powiadomień watchdoga.
+      const batteryAlert = computeAlerts(pot, config, now).find(
+        (a) => a.code === 'CRITICAL_BATTERY' || a.code === 'LOW_BATTERY'
+      );
+
+      if (batteryAlert) {
         console.warn(
-          `[!! ALARM !!] Doniczka "${pot.name}" ma niski poziom baterii: ${pot.battery_mv}mV (limit: ${LOW_BATTERY_THRESHOLD_MV}mV)!`
+          `[!! ALARM !!] Doniczka "${pot.name}" ma niski poziom baterii: ${pot.battery_mv}mV (limit: ${config.battery_critical_mv}mV)!`
         );
 
         alerts.push({
-          type: 'low_battery',
+          type: batteryAlert.code === 'CRITICAL_BATTERY' ? 'critical_battery' : 'low_battery',
           pot_id: pot.id,
           name: pot.name,
           battery_mv: pot.battery_mv,
-          threshold_mv: LOW_BATTERY_THRESHOLD_MV,
+          threshold_mv: config.battery_critical_mv,
         });
       }
 
       if (!pot.last_signal_time) return; // Pomijamy doniczki bez żadnego sygnału
 
       const lastTime = new Date(pot.last_signal_time);
-      const now = new Date();
       const diffMs = now - lastTime;
       const diffMin = diffMs / 1000 / 60;
 
@@ -58,7 +65,7 @@ export default async function handler(req, res) {
         );
 
         // [TUTAJ PÓŹNIEJ WPADNIEMY Z FIREBASE / PUSH NOTIFICATIONS / EMAIL]
-        
+
         alerts.push({
           type: 'overdue',
           pot_id: pot.id,
