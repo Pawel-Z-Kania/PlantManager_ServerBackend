@@ -19,8 +19,8 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { data, error } = await supabase
-        .froconfig = await getSystemConfig();      return res.status(200).json(config);
+      const config = await getSystemConfig();
+      return res.status(200).json(config);
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {
