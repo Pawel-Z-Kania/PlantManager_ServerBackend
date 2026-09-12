@@ -9,8 +9,18 @@ export default async function handler(req, res) {
 
   const { board_id, from, to, bucket_minutes } = req.query;
 
-  if (!board_id) {
-    return res.status(400).json({ error: 'Required parameter board_id not provided' });
+  if (!board_id || !from || !to) {
+    return res.status(400).json({ error: 'Required parameters board_id, from and to not provided' });
+  }
+
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  const bucketMin = Number.parseInt(bucket_minutes ?? '0', 10);
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) || fromDate >= toDate) {
+    return res.status(400).json({ error: 'Invalid time range' });
+  }
+  if (!Number.isInteger(bucketMin) || bucketMin < 0 || bucketMin > 1440) {
+    return res.status(400).json({ error: 'bucket_minutes must be an integer from 0 to 1440' });
   }
 
   try {
@@ -23,43 +33,23 @@ export default async function handler(req, res) {
     if (potError) throw potError;
     if (!pot) return res.status(404).json({ error: 'Nie znaleziono doniczki' });
 
-    const bucketMin = parseInt(bucket_minutes) || 0;
-    // Higher cap for bucketed queries — raw rows are aggregated before response
-    const safetyCap = bucketMin > 0 ? 50000 : 2000;
-
-    let query = supabase
-      .from('pot_measurements')
-      .select('sensor_value, measured_at')
-      .eq('pot_id', pot.id)
-      .order('measured_at', { ascending: true })
-      .limit(safetyCap);
-
-    if (from) query = query.gte('measured_at', from);
-    if (to)   query = query.lte('measured_at', to);
-
-    const { data: history, error: historyError } = await query;
+    const { data: history, error: historyError } = await supabase.rpc('get_pot_history', {
+      p_pot_id: pot.id,
+      p_from: fromDate.toISOString(),
+      p_to: toDate.toISOString(),
+      p_bucket_minutes: bucketMin,
+    });
     if (historyError) throw historyError;
 
-    if (bucketMin > 0 && history.length > 0) {
-      const bucketMs = bucketMin * 60 * 1000;
-      const buckets = {};
-      for (const row of history) {
-        const ts  = new Date(row.measured_at).getTime();
-        const key = Math.floor(ts / bucketMs) * bucketMs;
-        if (!buckets[key]) buckets[key] = { sum: 0, count: 0 };
-        buckets[key].sum   += row.sensor_value;
-        buckets[key].count += 1;
-      }
-      const aggregated = Object.entries(buckets)
-        .sort(([a], [b]) => Number(a) - Number(b))
-        .map(([ts, { sum, count }]) => ({
-          sensor_value: Math.round(sum / count),
-          measured_at:  new Date(Number(ts)).toISOString(),
-        }));
-      return res.status(200).json({ data: aggregated });
-    }
+    const meta = {
+      from: fromDate.toISOString(),
+      to: toDate.toISOString(),
+      bucket_minutes: bucketMin,
+      source_row_count: history.reduce((total, row) => total + Number(row.sample_count), 0),
+      truncated: false,
+    };
 
-    return res.status(200).json({ data: history });
+    return res.status(200).json({ data: history, meta });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

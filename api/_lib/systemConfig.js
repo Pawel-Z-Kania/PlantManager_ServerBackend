@@ -6,6 +6,7 @@ export const DEFAULT_SYSTEM_CONFIG = {
   battery_critical_mv: 2700,
   battery_warning_mv: 2800,
   connection_timeout_hours: 2,
+  sensor_sample_interval_sec: 30,
 };
 
 export async function getSystemConfig() {

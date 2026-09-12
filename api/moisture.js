@@ -46,14 +46,17 @@ export default async function handler(req, res) {
       pot = newPot;
     }
 
-    // Step B: Save the pot measurement
-    const { error: insertError } = await supabase
-      .from('pot_measurements')
-      .insert([{ pot_id: pot.id, sensor_value: value, battery_mv: batteryMv }]);
+    const { data: acceptance, error: acceptanceError } = await supabase.rpc('accept_measurement', {
+      p_pot_id: pot.id,
+      p_sensor_value: value,
+      p_battery_mv: batteryMv,
+    });
 
-    if (insertError) throw insertError;
+    if (acceptanceError) throw acceptanceError;
+    const outcome = acceptance?.[0];
+    if (!outcome) throw new Error('Brak odpowiedzi funkcji accept_measurement');
 
-    // Step C: Update latest known battery level 
+    // Step C: Update latest known battery level
     if (batteryMv !== null) {
       const { error: updateError } = await supabase
         .from('pots')
@@ -63,7 +66,22 @@ export default async function handler(req, res) {
       if (updateError) throw updateError;
     }
 
-    return res.status(200).json({ success: true, message: 'Measurement saved' });
+    if (!outcome.saved) {
+      return res.status(202).json({
+        success: true,
+        saved: false,
+        message: 'Measurement skipped because of the global sampling interval',
+        sensor_sample_interval_sec: outcome.sensor_sample_interval_sec,
+        retry_after_sec: outcome.retry_after_sec,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      saved: true,
+      message: 'Measurement saved',
+      sensor_sample_interval_sec: outcome.sensor_sample_interval_sec,
+    });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
