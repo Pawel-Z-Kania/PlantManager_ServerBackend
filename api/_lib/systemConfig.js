@@ -3,6 +3,7 @@
 import { supabase } from './supabaseClient.js';
 
 export const DEFAULT_SYSTEM_CONFIG = {
+  config_version: 1,
   battery_critical_mv: 2700,
   battery_warning_mv: 2800,
   connection_timeout_hours: 2,

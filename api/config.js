@@ -10,11 +10,16 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PUT,POST');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, x-api-key'
   );
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  const apiKey = req.headers['x-api-key'];
+  if (process.env.API_SECRET_KEY && apiKey !== process.env.API_SECRET_KEY) {
+    return res.status(401).json({ error: 'No authentication' });
   }
 
   try {
@@ -24,14 +29,19 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {
-      const body = req.body;
+      const { config_version, ...body } = req.body;
+      if (body.sensor_sample_interval_sec !== undefined &&
+          (!Number.isInteger(body.sensor_sample_interval_sec) ||
+           body.sensor_sample_interval_sec < 1 ||
+           body.sensor_sample_interval_sec > 3600)) {
+        return res.status(400).json({ error: 'sensor_sample_interval_sec must be an integer from 1 to 3600' });
+      }
+
       const { data, error } = await supabase
-        .from('system_config')
-        .upsert({ id: 1, ...body })
-        .select();
+        .rpc('update_system_config', { p_config: body });
 
       if (error) throw error;
-      return res.status(200).json({ success: true, config: data });
+      return res.status(200).json({ success: true, config: data[0] });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });
