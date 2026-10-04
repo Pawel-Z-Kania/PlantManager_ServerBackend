@@ -1,5 +1,5 @@
-// PUT /api/update-pot — Zapisuje nazwę doniczki i progi kalibracji czujnika (sucho/mokro)
-// edytowane przez użytkownika w aplikacji.
+// PUT /api/update-pot — Zapisuje nazwę doniczki, typ rośliny (opcjonalny) i progi kalibracji czujnika
+// (sucho/mokro) edytowane przez użytkownika w aplikacji.
 import { supabase } from './_lib/supabaseClient.js';
 
 export default async function handler(req, res) {
@@ -17,15 +17,34 @@ COMMENTED OUT UNTIL AUTH WILL BE EXPANDED
   }
 */
 
-  const { id, name, dry_calibration_value, wet_calibration_value } = req.body;
+  const { id, name, dry_calibration_value, wet_calibration_value, plant_type } = req.body;
 
   if (!id || !name || dry_calibration_value === undefined || wet_calibration_value === undefined) {
     return res.status(400).json({ error: 'Brak wymaganych danych' });
   }
 
+  const changes = { name, dry_calibration_value, wet_calibration_value };
+
+  if (plant_type !== undefined) {
+    if (typeof plant_type !== 'string') {
+      return res.status(400).json({ error: 'Nieznany typ rośliny' });
+    }
+
+    const { data: knownType, error: typeError } = await supabase
+      .from('plant_types')
+      .select('code')
+      .eq('code', plant_type)
+      .maybeSingle();
+
+    if (typeError) return res.status(500).json({ error: typeError.message });
+    if (!knownType) return res.status(400).json({ error: 'Nieznany typ rośliny' });
+
+    changes.plant_type = plant_type;
+  }
+
   const { error } = await supabase
     .from('pots')
-    .update({ name, dry_calibration_value, wet_calibration_value })
+    .update(changes)
     .eq('id', id);
 
   if (error) return res.status(500).json({ error: error.message });

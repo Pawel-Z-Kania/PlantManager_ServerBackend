@@ -2,8 +2,12 @@
   "name": "pltmng_serverbackend",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "ml-levenberg-marquardt": "^5.1.0"
   }
 }

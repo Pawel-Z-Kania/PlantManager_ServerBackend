@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     // 2. Pobierz doniczki i najnowszy odczyt
     const { data: pots, error } = await supabase
       .from('pots')
-      .select('id, name, board_id, last_signal_time, dry_calibration_value, wet_calibration_value, battery_mv, interval_minutes, pot_measurements(sensor_value)')
+      .select('id, name, board_id, plant_type, last_signal_time, last_watered_at, next_watered_date, dry_calibration_value, wet_calibration_value, battery_mv, interval_minutes, pot_measurements(sensor_value)')
       .order('measured_at', { referencedTable: 'pot_measurements', ascending: false })
       .limit(1, { referencedTable: 'pot_measurements' });
 
