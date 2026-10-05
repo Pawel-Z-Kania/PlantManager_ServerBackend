@@ -1,31 +1,35 @@
-// GET /api/watchdog — Vercel Cron (patrz vercel.json, raz dziennie). Sprawdza doniczki pod kątem
-// niskiego poziomu baterii (te same progi/logika co pots.js, przez computeAlerts) oraz opóźnień
-// w raportowaniu względem oczekiwanego interwału danej doniczki (interval_minutes) — osobny,
-// wcześniejszy sygnał ostrzegawczy pomyślany pod przyszłe powiadomienia push/e-mail.
+// GET /api/watchdog — wywoływany co godzinę (Supabase pg_cron, patrz supabase/setup_watchdog_schedule.sql;
+// Vercel Cron działa tylko raz na dobę). Wyznacza incydenty (utrata sygnału doniczki, utrata sygnału wszystkich
+// doniczek, termin podlania) i wysyła każdy raz jako push FCM. Stan incydentów trzyma notification_incidents.
+// Bateria jest tylko raportowana w odpowiedzi i logach, bez push. Wymaga CRON_SECRET (brak zmiennej = odmowa).
 import { supabase } from './_lib/supabaseClient.js';
 import { getSystemConfig } from './_lib/systemConfig.js';
 import { computeAlerts } from './_lib/alerts.js';
+import { isAuthorizedCron } from './_lib/cronAuth.js';
+import { createFcmSender, readServiceAccount } from './_lib/fcm.js';
+import { incidentStore } from './_lib/incidentStore.js';
+import { processIncidents } from './_lib/incidents.js';
 
 export default async function handler(req, res) {
-  // Opcjonalne zabezpieczenie: Vercel Cron przesyła specjalny nagłówek Authorization
-  // Możesz go zweryfikować, jeśli ustawisz CRON_SECRET w zmiennych środowiskowych Vercela
-  if (process.env.CRON_SECRET) {
-    const authHeader = req.headers.authorization;
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      return res.status(401).json({ error: 'Brak autoryzacji' });
-    }
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    console.error('[WATCHDOG] CRON_SECRET nie jest skonfigurowany');
+    return res.status(500).json({ error: 'CRON_SECRET nie jest skonfigurowany' });
+  }
+  if (!isAuthorizedCron(req.headers.authorization, secret)) {
+    return res.status(401).json({ error: 'Brak autoryzacji' });
   }
 
-  console.log('[WATCHDOG] Sprawdzanie opóźnień czujników...');
+  console.log('[WATCHDOG] Sprawdzanie doniczek...');
 
   try {
-    // Pobierz dynamiczne progi z system_config
+    // Przed jakąkolwiek zmianą w bazie: brak konfiguracji FCM nie może zużywać prób wysyłki.
+    const send = createFcmSender({ account: readServiceAccount() });
     const config = await getSystemConfig();
 
-    // Zapytanie do bazy o doniczki wraz z parametrami interwału
     const { data: pots, error } = await supabase
       .from('pots')
-      .select('id, name, last_signal_time, interval_minutes, battery_mv');
+      .select('id, name, last_signal_time, battery_mv, next_watered_date');
 
     if (error) throw error;
 
@@ -51,36 +55,23 @@ export default async function handler(req, res) {
           threshold_mv: config.battery_critical_mv,
         });
       }
+    });
 
-      if (!pot.last_signal_time) return; // Pomijamy doniczki bez żadnego sygnału
-
-      const lastTime = new Date(pot.last_signal_time);
-      const diffMs = now - lastTime;
-      const diffMin = diffMs / 1000 / 60;
-
-      if (diffMin > pot.interval_minutes) {
-        const overDueMin = Math.round(diffMin);
-        console.warn(
-          `[!! ALARM !!] Doniczka "${pot.name}" nie dawała znaku przez ${overDueMin} min (limit: ${pot.interval_minutes} min)!`
-        );
-
-        // [TUTAJ PÓŹNIEJ WPADNIEMY Z FIREBASE / PUSH NOTIFICATIONS / EMAIL]
-
-        alerts.push({
-          type: 'overdue',
-          pot_id: pot.id,
-          name: pot.name,
-          overdue_minutes: overDueMin,
-          limit_minutes: pot.interval_minutes,
-        });
-      }
+    const incidents = await processIncidents({
+      pots,
+      openIncidents: await incidentStore.loadOpen(),
+      config,
+      now,
+      store: incidentStore,
+      send,
     });
 
     return res.status(200).json({
       success: true,
       checked_pots: pots.length,
       alerts_count: alerts.length,
-      alerts: alerts,
+      alerts,
+      incidents,
     });
   } catch (err) {
     console.error('[WATCHDOG] Błąd wykonania:', err.message);

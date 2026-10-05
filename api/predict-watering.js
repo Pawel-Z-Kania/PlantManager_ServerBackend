@@ -1,19 +1,13 @@
 // GET /api/predict-watering — Wywoływany co 3 h przez Supabase pg_cron (Vercel Hobby dopuszcza cron
 // tylko raz na dobę). Liczy next_watered_date dla doniczek z last_watered_at i zapisuje wszystkie
 // zmiany jednym wywołaniem RPC. Wymaga CRON_SECRET (brak zmiennej = odmowa, bez trybu otwartego).
-import { timingSafeEqual } from 'node:crypto';
 import { supabase } from './_lib/supabaseClient.js';
+import { isAuthorizedCron } from './_lib/cronAuth.js';
 import { predictNextWatering } from './_lib/dryingCurve.js';
 
 const BUCKET_MINUTES = 60;
 // Zmiana poniżej progu nie jest zapisywana, żeby data w aplikacji nie "pływała" po każdym przebiegu.
 const MIN_CHANGE_SEC = 2 * 3600;
-
-function isAuthorized(authHeader, secret) {
-  const expected = Buffer.from(`Bearer ${secret}`);
-  const actual = Buffer.from(authHeader ?? '');
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -25,7 +19,7 @@ export default async function handler(req, res) {
     console.error('[PREDICT] CRON_SECRET nie jest skonfigurowany');
     return res.status(500).json({ error: 'CRON_SECRET nie jest skonfigurowany' });
   }
-  if (!isAuthorized(req.headers.authorization, secret)) {
+  if (!isAuthorizedCron(req.headers.authorization, secret)) {
     return res.status(401).json({ error: 'Brak autoryzacji' });
   }
 
